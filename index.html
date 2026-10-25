@@ -28,7 +28,7 @@ label{font-weight:600;gap:8px;color:#c2ced7}input[type=checkbox]{width:22px;heig
 footer{border-top:1px solid #253443;background:#0c141d}
 @media(max-width:720px){header{padding:12px 16px}header small{font-size:10px}.shell{padding:16px 14px 110px}.hero{padding:26px 22px;border-radius:20px}.hero h2{font-size:32px;letter-spacing:-1px}.nav{position:fixed;top:auto;bottom:0;left:0;right:0;margin:0;z-index:100;grid-template-columns:repeat(4,1fr);border-radius:18px 18px 0 0;border-bottom:0;padding:9px 7px max(11px,env(safe-area-inset-bottom));box-shadow:0 -10px 35px #0008}.nav button{font-size:11px;padding:11px 4px;min-height:48px}.body-layout{grid-template-columns:1fr}.figure-panel{max-width:none}.grid{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:11px}.card{padding:14px;border-radius:15px}.product-preview{height:140px}.product-preview svg{width:112px;height:112px}.store-links a{min-width:100%;padding:10px 8px}.section .row{align-items:flex-start}.section .row h2{font-size:22px}#alerts{font-size:12px;padding:10px}.routine{padding:14px}.routine .btn{padding:8px 11px}footer{padding-bottom:100px}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
-</style></head>
+.add-product-routine{display:grid;grid-template-columns:102px minmax(0,1fr);gap:9px;margin-top:13px}.add-product-routine input{min-width:0;width:100%;padding:9px;font-size:13px}.add-product-routine .btn{padding:9px;font-size:12px}.product-preview img{height:100%;width:100%;object-fit:contain;background:#f5f5f2;padding:9px}.product-preview-label{max-width:96%;font-size:10px}@media(max-width:720px){.add-product-routine{grid-template-columns:1fr}.add-product-routine input{min-height:40px}}</style></head>
 <body><header><h1><span class="brand-mark">✦</span><span class="gold">MENCARE</span></h1><small>EVOLUA TODOS OS DIAS</small></header>
 <main class="shell">
 <section class="hero"><span class="tag">ASSISTENTE DE AUTOCUIDADO</span><h2>Cuidados masculinos<br><span class="gold">da cabeça aos pés.</span></h2><p class="muted">Monte sua rotina, descubra categorias de produtos e receba lembretes durante o uso do app.</p><div class="progress"><div id="bar"></div></div><p id="summary" style="margin-top:9px;font-size:13px">Seu progresso de hoje</p></section>
@@ -120,6 +120,66 @@ function shopLinks(product){
  shops.forEach(([name,url])=>{const a=el('a',name,'btn');a.href=url(query);a.target='_blank';a.rel='noopener noreferrer';a.setAttribute('aria-label','Pesquisar '+query+' em '+name+' (nova aba)');row.append(a)});
  return row;
 }
+
+function areaFromLabel(label){
+ const l=String(label||'').toLowerCase();
+ if(/cabelo|capilar|couro cabeludo/.test(l))return 'Cabelo';
+ if(/barba/.test(l))return 'Barba e bigode';
+ if(/dente|bucal/.test(l))return 'Boca e dentes';
+ if(/lábio/.test(l))return 'Lábios';
+ if(/axila/.test(l))return 'Axilas';
+ if(/mão|unha/.test(l))return 'Mãos e unhas';
+ if(/pé|calcanhar/.test(l))return 'Pés e calcanhares';
+ if(/íntim|virilha/.test(l))return 'Virilha e área íntima externa';
+ if(/rosto|facial|solar/.test(l))return 'Rosto';
+ return selectedRegion||'Braços e cotovelos';
+}
+function routineAddControl(product,area){
+ const wrap=el('div',undefined,'add-product-routine');
+ const time=el('input');time.type='time';time.value=/solar|facial|rosto|bucal/.test((product+' '+area).toLowerCase())?'08:00':'20:00';
+ time.setAttribute('aria-label','Horário para '+product);
+ const btn=el('button','＋ Adicionar à rotina','btn primary');btn.type='button';
+ btn.onclick=()=>{
+  const name=String(product||'Produto de autocuidado').slice(0,100),region=categories.some(c=>c[0]===area)?area:areaFromLabel(area);
+  if(!/^([01]\\d|2[0-3]):[0-5]\\d$/.test(time.value)){alert('Escolha um horário válido.');return}
+  if(db.tasks.some(t=>t.name===name&&t.area===region&&t.time===time.value)){btn.textContent='✓ Já está na rotina';return}
+  db.tasks.push({id:crypto.randomUUID(),name,area:region,time:time.value});
+  save();draw();btn.textContent='✓ Adicionado à rotina';
+ };
+ wrap.append(time,btn);return wrap;
+}
+const catalogCache=new Map();
+async function catalogPhoto(product,preview){
+ const q=String(product||'').trim().slice(0,70);
+ if(!q)return;
+ const matchKey=q.toLowerCase();
+ if(catalogCache.has(matchKey)){showCatalogPhoto(catalogCache.get(matchKey),preview);return}
+ try{
+  const url='https://world.openbeautyfacts.org/cgi/search.pl?search_terms='+encodeURIComponent(q)+'&search_simple=1&action=process&json=1&page_size=8&fields=product_name,image_front_small_url,image_front_url,brands';
+  const ctrl=new AbortController(),tm=setTimeout(()=>ctrl.abort(),6500);
+  let response;try{response=await fetch(url,{signal:ctrl.signal})}finally{clearTimeout(tm)}
+  if(!response.ok)throw Error('Catálogo indisponível');
+  const data=await response.json();
+  const products=(data.products||[]).filter(x=>x.product_name&&(x.image_front_small_url||x.image_front_url));
+  const target=new Set(q.toLocaleLowerCase('pt-BR').split(/\\W+/).filter(w=>w.length>3&& !['para','suave','com','sem','pele','produto'].includes(w)));
+  const candidates=products.map(p=>({p,score:[...target].filter(w=>(p.product_name||'').toLocaleLowerCase('pt-BR').includes(w)).length})).sort((a,b)=>b.score-a.score);
+  const best=candidates[0];if(!best||best.score<1)return;
+  const item={name:best.p.product_name,brand:best.p.brands||'',src:best.p.image_front_small_url||best.p.image_front_url};
+  catalogCache.set(matchKey,item);showCatalogPhoto(item,preview)
+ }catch(_){/* Mantém a ilustração quando o catálogo não responder. */}
+}
+function showCatalogPhoto(item,preview){
+ if(!preview||!preview.isConnected)return;
+ const img=el('img');img.alt='Fotografia real de catálogo: '+item.name+(item.brand?' — '+item.brand:'');
+ img.loading='lazy';img.referrerPolicy='no-referrer';
+ img.onload=()=>{preview.replaceChildren(img,el('span','Foto de catálogo · produto similar','product-preview-label'));preview.title='Produto de referência: '+item.name+'. Confira o anúncio antes de comprar.'};
+ img.src=item.src;
+}
+function productMedia(product){
+ const panel=productPreview(product);
+ catalogPhoto(product,panel);
+ return panel;
+}
 $('#suggest').onclick=async()=>{let p=db.profile;let out=$('#suggestions');out.replaceChildren();let items=[
 ['Rosto · limpeza',p.skin==='oleosa'||p.skin==='mista'?'Gel de limpeza facial suave para pele oleosa ou mista':p.skin==='seca'||p.skin==='sensivel'?'Limpador facial suave sem fragrância':'Limpador facial suave','Escolha produto adequado ao tipo de pele e evite limpeza excessiva.'],
 ['Rosto · proteção','Protetor solar de amplo espectro FPS 30 ou superior','Priorize textura confortável para uso diário e reaplicação conforme exposição.'],
@@ -132,11 +192,11 @@ $('#suggest').onclick=async()=>{let p=db.profile;let out=$('#suggestions');out.r
 ['Pés','Creme hidratante para calcanhares','Não aplique creme entre os dedos se houver excesso de umidade.'],
 ['Higiene íntima externa','Produto suave sem perfume, ou água conforme necessidade','Não utilizar perfumes, esfoliantes ou produtos agressivos em mucosas.'],
 ['Saúde bucal','Creme dental com flúor e fio dental','Uma boa rotina inclui higiene bucal; recomendações específicas cabem ao dentista.']
-];if(p.goal==='oleosidade')items[0][2]+=' Para oleosidade persistente, procure dermatologista.';if(p.budget==='economico')items.unshift(['Prioridade para seu orçamento','Comece com limpeza, hidratante, protetor solar e higiene básica','Compre somente o necessário, sem rotinas excessivas.']);items.forEach(([name,product,reason])=>{let box=el('article',undefined,'card product-card');box.append(el('div',name,'tag'),productPreview(product),el('h3',product),el('p',reason,'muted'),shopLinks(product));out.append(box)});
+];if(p.goal==='oleosidade')items[0][2]+=' Para oleosidade persistente, procure dermatologista.';if(p.budget==='economico')items.unshift(['Prioridade para seu orçamento','Comece com limpeza, hidratante, protetor solar e higiene básica','Compre somente o necessário, sem rotinas excessivas.']);items.forEach(([name,product,reason])=>{let box=el('article',undefined,'card product-card');box.append(el('div',name,'tag'),productMedia(product),el('h3',product),el('p',reason,'muted'),routineAddControl(product,areaFromLabel(name)),shopLinks(product));out.append(box)});
 let url=localStorage.getItem('mencare-ai-endpoint');if(!url){$('#aiStatus').textContent='Sugestões locais exibidas. Configure o endpoint para ativar a IA.';return}
 $('#aiStatus').textContent='Consultando o serviço de IA…';$('#suggest').disabled=true;
 try{let controller=new AbortController();let timeout=setTimeout(()=>controller.abort(),20000);let response;try{response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile:p,region:selectedRegion}),signal:controller.signal})}finally{clearTimeout(timeout)}
-if(!response.ok)throw Error('HTTP '+response.status);let data=await response.json();if(!Array.isArray(data.suggestions)||!data.suggestions.length)throw Error('Resposta inválida');out.replaceChildren();data.suggestions.slice(0,12).forEach(item=>{let card=el('article',undefined,'card product-card');card.append(el('div',String(item.area||selectedRegion),'tag'),productPreview(String(item.product||'')),el('h3',String(item.product||'Produto sugerido')),el('p',String(item.reason||''),'muted'),shopLinks(String(item.product||'produto de autocuidado')));out.append(card)});$('#aiStatus').textContent='Sugestões geradas pela IA. Confirme ingredientes e tolerância antes de usar.'}catch(err){$('#aiStatus').textContent='Serviço de IA indisponível ('+err.message+'). Mantidas sugestões locais.'}finally{$('#suggest').disabled=false}};
+if(!response.ok)throw Error('HTTP '+response.status);let data=await response.json();if(!Array.isArray(data.suggestions)||!data.suggestions.length)throw Error('Resposta inválida');out.replaceChildren();data.suggestions.slice(0,12).forEach(item=>{let card=el('article',undefined,'card product-card');card.append(el('div',String(item.area||selectedRegion),'tag'),productMedia(String(item.product||'')),el('h3',String(item.product||'Produto sugerido')),el('p',String(item.reason||''),'muted'),routineAddControl(String(item.product||'Produto sugerido'),String(item.area||selectedRegion)),shopLinks(String(item.product||'produto de autocuidado')));out.append(card)});$('#aiStatus').textContent='Sugestões geradas pela IA. Confirme ingredientes e tolerância antes de usar.'}catch(err){$('#aiStatus').textContent='Serviço de IA indisponível ('+err.message+'). Mantidas sugestões locais.'}finally{$('#suggest').disabled=false}};
 $('#clear').onclick=()=>{if(confirm('Apagar todas as preferências e atividades salvas neste navegador?')){localStorage.removeItem(KEY);location.reload()}};
 $('#alerts').onclick=async()=>{if(!('Notification' in window)){alert('Este navegador não oferece notificações.');return}if(!isSecureContext){alert('Publique em HTTPS para solicitar notificações.');return}let state=await Notification.requestPermission();alert(state==='granted'?'Notificações autorizadas enquanto o app estiver ativo.':'Permissão não concedida.')};
 let sent=new Set();setInterval(()=>{let now=new Date(),hm=now.toTimeString().slice(0,5),day=date();for(let t of db.tasks){let k=day+'|'+t.id;if(t.time===hm&&!db.done[k]&&!sent.has(k)){sent.add(k);if('Notification' in window&&Notification.permission==='granted')new Notification('MENCARE · '+t.name,{body:'Está na hora do seu cuidado: '+t.area,tag:k})}}},15000);
